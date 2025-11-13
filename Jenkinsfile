@@ -1,49 +1,35 @@
 pipeline {
     agent any
-
     environment {
-        IMAGE_NAME = "softoolshop"
+        DOCKER_HUB_USER = 'inddocker786'
+        IMAGE_NAME = 'softoolshop-dev'
     }
-
     stages {
         stage('Checkout SCM') {
+            steps { checkout scm }
+        }
+        stage('Build Docker Image') {
             steps {
-                checkout scm
+                sh 'docker build -t $DOCKER_HUB_USER/$IMAGE_NAME:latest .'
             }
         }
-
-        stage('Build JAR') {
+        stage('Push to Docker Hub') {
             steps {
-                script {
-                    docker.image('maven:3.9.6-eclipse-temurin-17').inside('-v $HOME/.m2:/root/.m2') {
-                        sh 'mvn clean package -DskipTests'
-                        sh 'mv target/*.jar target/backend.jar'
-                    }
+                withCredentials([string(credentialsId: 'dockerhub-token', variable: 'DOCKER_HUB_TOKEN')]) {
+                    sh '''
+                    echo $DOCKER_HUB_TOKEN | docker login -u $DOCKER_HUB_USER --password-stdin
+                    docker push $DOCKER_HUB_USER/$IMAGE_NAME:latest
+                    '''
                 }
             }
         }
-
-        stage('Build & Push Docker Image') {
-            steps {
-                script {
-                    withCredentials([usernamePassword(credentialsId: 'dockerhub-password',
-                                                     usernameVariable: 'DOCKER_HUB_USER',
-                                                     passwordVariable: 'DOCKER_HUB_PASS')]) {
-                        sh '''
-                            echo "${DOCKER_HUB_PASS}" | docker login -u "${DOCKER_HUB_USER}" --password-stdin
-                            docker build -t ${DOCKER_HUB_USER}/${IMAGE_NAME}:latest .
-                            docker push ${DOCKER_HUB_USER}/${IMAGE_NAME}:latest
-                        '''
-                    }
-                }
-            }
-        }
-
         stage('Deploy to Kubernetes') {
             steps {
-                sh 'kubectl apply -f deployment.yaml'
+                sh '''
+                kubectl apply -f k8s/deployment.yaml
+                kubectl rollout restart deployment softoolshop
+                '''
             }
         }
     }
 }
-
